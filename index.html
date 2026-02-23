@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDFスプリッター - ページ抽出ツール</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF.js for rendering previews -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- pdf-lib for editing and exporting PDFs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        stone: {
+                            50: '#fafaf9',
+                            100: '#f5f5f4',
+                            200: '#e7e5e4',
+                            300: '#d6d3d1',
+                            400: '#a8a29e',
+                            500: '#78716c',
+                            600: '#57534e',
+                            700: '#44403c',
+                            800: '#292524',
+                            900: '#1c1917',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* カスタムスクロールバー */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f5f5f4; }
+        ::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
+        
+        /* ページカードのスタイル設定 */
+        .page-card { transition: all 0.2s ease-in-out; }
+        .page-card .checkmark { display: none; }
+        .page-card .uncheckmark { display: block; }
+        
+        /* 選択状態のスタイル */
+        .page-card.selected {
+            border-color: #78716c; /* stone-500 */
+            background-color: #f5f5f4; /* stone-100 */
+            box-shadow: 0 0 0 3px rgba(120, 113, 108, 0.2);
+        }
+        .page-card.selected .checkmark { display: block; color: #57534e; }
+        .page-card.selected .uncheckmark { display: none; }
+        
+        /* ドラッグオーバー時のスタイル */
+        .drag-over {
+            border-color: #78716c !important;
+            background-color: #f5f5f4 !important;
+        }
+    </style>
+</head>
+<body class="bg-stone-50 text-stone-800 font-sans min-h-screen flex flex-col selection:bg-stone-200">
+
+    <!-- ヘッダー -->
+    <header class="bg-white border-b border-stone-200 sticky top-0 z-40 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-2 text-stone-700">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <path d="M12 18v-6"></path>
+                    <path d="M9 15h6"></path>
+                </svg>
+                <h1 class="text-xl font-semibold tracking-tight">PDF Splitter</h1>
+            </div>
+            <button id="reset-btn" class="hidden text-sm text-stone-500 hover:text-stone-800 transition-colors flex items-center gap-1">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+                別のファイルを開く
+            </button>
+        </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="flex-grow w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex flex-col">
+        
+        <!-- アップロードエリア -->
+        <div id="upload-area" class="flex-grow flex items-center justify-center">
+            <div id="drop-zone" class="w-full max-w-2xl bg-white border-2 border-dashed border-stone-300 rounded-2xl p-12 text-center transition-all duration-200 hover:border-stone-400 hover:bg-stone-50 cursor-pointer shadow-sm">
+                <div class="mx-auto w-16 h-16 bg-stone-100 rounded-full flex items-center justify-center mb-4 text-stone-500">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                </div>
+                <h2 class="text-xl font-medium text-stone-700 mb-2">PDFファイルをドロップ</h2>
+                <p class="text-stone-500 mb-6 text-sm">または、クリックしてファイルを選択してください</p>
+                <input type="file" id="file-input" accept="application/pdf" class="hidden">
+                <button class="bg-stone-700 hover:bg-stone-800 text-white px-6 py-2.5 rounded-lg font-medium transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-stone-600">
+                    ファイルを選択
+                </button>
+            </div>
+        </div>
+
+        <!-- プレビューエリア -->
+        <div id="preview-area" class="hidden flex-col gap-4 pb-24">
+            <div class="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-xl shadow-sm border border-stone-200">
+                <div class="text-stone-600 text-sm">
+                    <span id="total-pages-display" class="font-semibold text-stone-800">0</span> ページ見つかりました。抽出したいページをクリックして選択してください。
+                </div>
+                <div class="flex gap-3">
+                    <button id="select-all-btn" class="text-sm px-3 py-1.5 rounded-md text-stone-600 hover:bg-stone-100 transition-colors">すべて選択</button>
+                    <button id="deselect-all-btn" class="text-sm px-3 py-1.5 rounded-md text-stone-600 hover:bg-stone-100 transition-colors">選択解除</button>
+                </div>
+            </div>
+
+            <!-- ページグリッド -->
+            <div id="pages-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                <!-- JavaScriptでサムネイルがここに挿入されます -->
+            </div>
+        </div>
+
+    </main>
+
+    <!-- 固定アクションバー（ページ選択時に下からスライドイン） -->
+    <div id="action-bar" class="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] transform translate-y-full transition-transform duration-300 z-40">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-stone-100 text-stone-800 h-10 w-10 rounded-full flex items-center justify-center font-bold text-lg">
+                    <span id="selected-count">0</span>
+                </div>
+                <span class="text-stone-600 font-medium">ページ選択中</span>
+            </div>
+            <button id="extract-btn" class="bg-stone-700 hover:bg-stone-800 text-white px-6 py-3 rounded-lg font-medium shadow-md transition-all flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-stone-600">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                選択したページを保存
+            </button>
+        </div>
+    </div>
+
+    <!-- ローディングオーバーレイ -->
+    <div id="loading-overlay" class="fixed inset-0 bg-stone-900/40 backdrop-blur-sm flex items-center justify-center z-50 hidden opacity-0 transition-opacity duration-300">
+        <div class="bg-white rounded-xl p-6 shadow-xl flex flex-col items-center gap-4 min-w-[200px]">
+            <div class="animate-spin rounded-full h-10 w-10 border-4 border-stone-200 border-t-stone-700"></div>
+            <p id="loading-text" class="text-stone-600 font-medium">処理中...</p>
+        </div>
+    </div>
+
+    <!-- トーストメッセージ -->
+    <div id="toast" class="fixed top-20 right-4 max-w-sm bg-white rounded-lg shadow-lg border border-stone-200 transform transition-all duration-300 translate-x-[120%] opacity-0 z-50 flex overflow-hidden">
+        <div id="toast-indicator" class="w-1.5 bg-stone-500"></div>
+        <div class="p-4 flex items-center gap-3 w-full">
+            <div id="toast-icon" class="text-stone-500">
+                <!-- アイコンが動的に挿入されます -->
+            </div>
+            <p id="toast-message" class="text-stone-700 font-medium text-sm"></p>
+        </div>
+    </div>
+
+    <script>
+        // PDF.jsのワーカー設定
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+        // 状態管理
+        let currentPdfBytes = null;
+        let originalFileName = '';
+        let selectedPages = new Set();
+        let totalPages = 0;
+        let pdfDocJs = null;
+
+        // DOM要素
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const uploadArea = document.getElementById('upload-area');
+        const previewArea = document.getElementById('preview-area');
+        const pagesGrid = document.getElementById('pages-grid');
+        const actionBar = document.getElementById('action-bar');
+        const selectedCountEl = document.getElementById('selected-count');
+        const extractBtn = document.getElementById('extract-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const totalPagesDisplay = document.getElementById('total-pages-display');
+        const selectAllBtn = document.getElementById('select-all-btn');
+        const deselectAllBtn = document.getElementById('deselect-all-btn');
+
+        // イベントリスナーの登録
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', handleFileSelect);
+        resetBtn.addEventListener('click', resetApp);
+        extractBtn.addEventListener('click', extractSelectedPages);
+        selectAllBtn.addEventListener('click', selectAllPages);
+        deselectAllBtn.addEventListener('click', deselectAllPages);
+
+        // ドラッグ＆ドロップイベント
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, preventDefaults, false);
+            document.body.addEventListener(eventName, preventDefaults, false);
+        });
+
+        function preventDefaults(e) {
+            e.preventDefault();
+            e.stopPropagation();
+        }
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('drag-over'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('drag-over'), false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            const dt = e.dataTransfer;
+            const files = dt.files;
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        });
+
+        // ファイル処理のエントリーポイント
+        async function handleFileSelect(e) {
+            if (e.target.files.length > 0) {
+                await processFile(e.target.files[0]);
+            }
+        }
+
+        // PDFファイルの読み込みとプレビュー生成
+        async function processFile(file) {
+            if (file.type !== 'application/pdf') {
+                showToast('PDFファイルを選択してください。', 'error');
+                return;
+            }
+
+            originalFileName = file.name.replace(/\.pdf$/i, '');
+            showLoading('PDFを読み込んでいます...');
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                
+                // PDF.jsが読み込み時にArrayBufferをデタッチ（所有権移動）してしまい、
+                // 後のpdf-libでの処理時にエラーになるのを防ぐため、コピーを保存しておく
+                currentPdfBytes = arrayBuffer.slice(0);
+                
+                // pdf.jsでドキュメントを読み込み
+                pdfDocJs = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                totalPages = pdfDocJs.numPages;
+                totalPagesDisplay.textContent = totalPages;
+                
+                // UI切り替え
+                uploadArea.classList.add('hidden');
+                previewArea.classList.remove('hidden');
+                previewArea.classList.add('flex');
+                resetBtn.classList.remove('hidden');
+                
+                // グリッドをクリア
+                pagesGrid.innerHTML = '';
+                selectedPages.clear();
+                updateActionBar();
+
+                // パフォーマンス向上のため、Intersection Observerを使って
+                // 画面に入ったページだけを描画する（Lazy Loading）
+                setupLazyLoading();
+
+            } catch (error) {
+                console.error('PDF Load Error:', error);
+                showToast('ファイルの読み込みに失敗しました。パスワード保護等の可能性があります。', 'error');
+                resetApp();
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Intersection Observerを利用した遅延描画の設定
+        function setupLazyLoading() {
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const card = entry.target;
+                        const pageNum = parseInt(card.dataset.page);
+                        if (!card.dataset.rendered) {
+                            renderCanvasForPage(pageNum, card);
+                            card.dataset.rendered = 'true';
+                        }
+                    }
+                });
+            }, { rootMargin: '200px' }); // 少し広めにマージンを取る
+
+            // 先にすべてのカードの枠組みだけを作成
+            for (let i = 1; i <= totalPages; i++) {
+                const card = createCardSkeleton(i);
+                pagesGrid.appendChild(card);
+                observer.observe(card);
+            }
+        }
+
+        // ページカードのHTML骨格を作成
+        function createCardSkeleton(pageNum) {
+            const card = document.createElement('div');
+            card.className = 'page-card relative bg-white border-2 border-transparent rounded-xl shadow-sm overflow-hidden cursor-pointer hover:shadow-md';
+            card.dataset.page = pageNum;
+            card.onclick = () => togglePageSelection(pageNum, card);
+
+            card.innerHTML = `
+                <div class="canvas-container flex justify-center items-center bg-stone-100 p-2 min-h-[160px] sm:min-h-[200px]">
+                    <div class="animate-pulse w-8 h-8 rounded-full bg-stone-200"></div>
+                </div>
+                <div class="p-2 sm:p-3 flex justify-between items-center border-t border-stone-100 bg-white">
+                    <span class="text-xs sm:text-sm font-medium text-stone-600">ページ ${pageNum}</span>
+                    <div class="checkmark">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" />
+                        </svg>
+                    </div>
+                    <div class="uncheckmark text-stone-300">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 sm:h-6 sm:w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <circle cx="12" cy="12" r="9" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" />
+                        </svg>
+                    </div>
+                </div>
+            `;
+            return card;
+        }
+
+        // 特定のページをCanvasに描画
+        async function renderCanvasForPage(pageNum, card) {
+            const container = card.querySelector('.canvas-container');
+            try {
+                const page = await pdfDocJs.getPage(pageNum);
+                
+                // カードの幅に合わせてスケールを調整
+                const viewportOrg = page.getViewport({ scale: 1 });
+                // コンテナの幅が0の場合はデフォルト値を使用
+                const containerWidth = container.clientWidth || 150; 
+                // Retinaディスプレイ等での鮮明さを保つために高めにスケールを設定
+                const scale = (containerWidth / viewportOrg.width) * 1.5;
+                const viewport = page.getViewport({ scale: scale });
+
+                const canvas = document.createElement('canvas');
+                canvas.width = viewport.width;
+                canvas.height = viewport.height;
+                // CSSで表示サイズを調整
+                canvas.style.width = '100%';
+                canvas.style.maxWidth = `${viewportOrg.width}px`;
+                canvas.className = 'h-auto drop-shadow-sm transition-opacity duration-300 opacity-0';
+                
+                const ctx = canvas.getContext('2d');
+                
+                await page.render({
+                    canvasContext: ctx,
+                    viewport: viewport
+                }).promise;
+                
+                // スピナーを消してCanvasを追加
+                container.innerHTML = '';
+                container.appendChild(canvas);
+                
+                // フェードイン効果
+                requestAnimationFrame(() => {
+                    canvas.classList.remove('opacity-0');
+                });
+
+            } catch(e) {
+                console.error(`Page ${pageNum} render error:`, e);
+                container.innerHTML = '<span class="text-stone-400 text-xs text-center px-2">プレビューを読み込めません</span>';
+            }
+        }
+
+        // ページの選択状態を切り替え
+        function togglePageSelection(pageNum, cardElement) {
+            if (selectedPages.has(pageNum)) {
+                selectedPages.delete(pageNum);
+                cardElement.classList.remove('selected');
+            } else {
+                selectedPages.add(pageNum);
+                cardElement.classList.add('selected');
+            }
+            updateActionBar();
+        }
+
+        // すべて選択
+        function selectAllPages() {
+            const cards = document.querySelectorAll('.page-card');
+            cards.forEach(card => {
+                const pageNum = parseInt(card.dataset.page);
+                selectedPages.add(pageNum);
+                card.classList.add('selected');
+            });
+            updateActionBar();
+        }
+
+        // 選択解除
+        function deselectAllPages() {
+            const cards = document.querySelectorAll('.page-card');
+            cards.forEach(card => {
+                const pageNum = parseInt(card.dataset.page);
+                selectedPages.delete(pageNum);
+                card.classList.remove('selected');
+            });
+            updateActionBar();
+        }
+
+        // アクションバーの表示更新
+        function updateActionBar() {
+            selectedCountEl.textContent = selectedPages.size;
+            if (selectedPages.size > 0) {
+                actionBar.classList.remove('translate-y-full');
+            } else {
+                actionBar.classList.add('translate-y-full');
+            }
+        }
+
+        // 選択したページを抽出して新しいPDFを生成
+        async function extractSelectedPages() {
+            if (selectedPages.size === 0) return;
+            
+            showLoading('PDFを生成しています...');
+            
+            // 描画処理が走るように少しだけディレイを入れる
+            await new Promise(r => setTimeout(r, 100));
+
+            try {
+                // 元のPDFをロード
+                const pdfDoc = await PDFLib.PDFDocument.load(currentPdfBytes);
+                // 新しい空のPDFを作成
+                const newPdfDoc = await PDFLib.PDFDocument.create();
+                
+                // 選択されたページ番号を昇順にソート (1-indexed)
+                const pagesToExtract = Array.from(selectedPages).sort((a, b) => a - b);
+                
+                // pdf-libは0-indexedなので -1 する
+                const indices = pagesToExtract.map(p => p - 1);
+                
+                // ページをコピーして新しいドキュメントに追加
+                const copiedPages = await newPdfDoc.copyPages(pdfDoc, indices);
+                copiedPages.forEach(page => {
+                    newPdfDoc.addPage(page);
+                });
+                
+                // バイト配列として保存
+                const pdfBytes = await newPdfDoc.save();
+                
+                // ダウンロードトリガー
+                const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                // ファイル名： 元のファイル名_extracted.pdf
+                a.download = `${originalFileName}_extracted.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                showToast(`${selectedPages.size}ページのPDFを保存しました。`, 'success');
+                
+                // 保存後、選択を解除する（任意）
+                // deselectAllPages();
+                
+            } catch (error) {
+                console.error('PDF Extraction Error:', error);
+                showToast('PDFの生成に失敗しました。', 'error');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // アプリの状態をリセット
+        function resetApp() {
+            currentPdfBytes = null;
+            originalFileName = '';
+            selectedPages.clear();
+            totalPages = 0;
+            if (pdfDocJs) {
+                pdfDocJs.destroy();
+                pdfDocJs = null;
+            }
+            fileInput.value = '';
+            
+            pagesGrid.innerHTML = '';
+            uploadArea.classList.remove('hidden');
+            previewArea.classList.add('hidden');
+            previewArea.classList.remove('flex');
+            resetBtn.classList.add('hidden');
+            
+            updateActionBar();
+        }
+
+        // --- UI Helper Functions ---
+
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingText = document.getElementById('loading-text');
+
+        function showLoading(text) {
+            loadingText.textContent = text;
+            loadingOverlay.classList.remove('hidden');
+            // setTimeoutでクラスを追加してトランジションを効かせる
+            setTimeout(() => {
+                loadingOverlay.classList.remove('opacity-0');
+            }, 10);
+        }
+
+        function hideLoading() {
+            loadingOverlay.classList.add('opacity-0');
+            setTimeout(() => {
+                loadingOverlay.classList.add('hidden');
+            }, 300); // トランジション時間と合わせる
+        }
+
+        let toastTimeout;
+        const toast = document.getElementById('toast');
+        const toastIcon = document.getElementById('toast-icon');
+        const toastMessage = document.getElementById('toast-message');
+        const toastIndicator = document.getElementById('toast-indicator');
+
+        function showToast(message, type = 'info') {
+            clearTimeout(toastTimeout);
+            
+            toastMessage.textContent = message;
+            
+            if (type === 'success') {
+                toastIndicator.className = 'w-1.5 bg-green-500';
+                toastIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`;
+            } else if (type === 'error') {
+                toastIndicator.className = 'w-1.5 bg-red-500';
+                toastIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
+            } else {
+                toastIndicator.className = 'w-1.5 bg-stone-500';
+                toastIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>`;
+            }
+
+            toast.classList.remove('translate-x-[120%]', 'opacity-0');
+            
+            toastTimeout = setTimeout(() => {
+                toast.classList.add('translate-x-[120%]', 'opacity-0');
+            }, 4000);
+        }
+    </script>
+</body>
+</html>
